@@ -1,0 +1,59 @@
+Adaptive single-pass local commands
+===================================
+
+Run these commands from the Unified_AFA_Comparisons project directory.
+
+Both commands below use:
+  - synthetic data with 1,000 samples, 10 modalities, and 2 classes
+  - 10 trials (seeds 42-51)
+  - one prequential training pass per trial
+  - full label feedback
+  - budget fractions 0.1, 0.3, 0.5, 0.7, and 0.9
+  - the 80-20 train/test split
+  - final inference after the single training pass
+
+Results are written automatically to:
+  results/Adaptive/singlepass/Synthetic/
+
+
+1. LP-Chain
+-----------
+
+LP-Chain is the default Adaptive acquisition policy. It uses empirical rewards,
+subset replay, and the VC confidence bound by default.
+
+python run_proposed_methods.py --method adaptive --dataset synthetic --max-modalities 10 --num-classes 2 --acquisition lp_chain
+
+
+2. Full Space
+-------------
+
+Full Space uses the flat UCB argmax policy over the complete action space.
+
+python run_proposed_methods.py --method adaptive --dataset synthetic --max-modalities 10 --num-classes 2 --acquisition ucb_argmax
+
+
+Optional class count
+--------------------
+
+Change the value of --num-classes to run a different synthetic class count.
+For example, use --num-classes 4 for the four-class experiment.
+
+
+Optional training-only and later inference runs
+-----------------------------------------------
+
+Append --skip-inference to either command to save a training-only workbook and
+its training-state database. Later, repeat the same command with
+--inference-only instead of --skip-inference to load that state and run final
+inference without retraining.
+
+
+Optional detailed trace
+-----------------------
+
+Append --trace-rounds to record one row per training encounter. Append
+--json-sidecars as well if manifest and crash-recovery JSONL files are needed.
+
+For bandit feedback, append both:
+  --feedback bandit --reward-update selected

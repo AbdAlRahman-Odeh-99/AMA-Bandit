@@ -1,0 +1,16 @@
+Online baseline examples
+========================
+
+Run all nine causal online baselines on the synthetic dataset:
+
+python -m baselines.run_baselines --method online_all --dataset synthetic --n-samples 1000 --n-views 10 --num-classes 2 --seeds 42,43,44,45,46
+
+Run a single online baseline by replacing METHOD with one of:
+online_aaco, online_cae, online_cwcf, online_dime, online_eddi,
+online_gdfs, online_jafa, online_ol, online_pt.
+
+python -m baselines.run_baselines --method METHOD --dataset synthetic --n-samples 1000 --n-views 10 --num-classes 4 --seeds 42,43,44,45,46
+
+Use --budget-fractions to override the default sweep and --output-csv to set
+the destination explicitly. Run `python -m baselines.run_baselines --help`
+for every supported option.
