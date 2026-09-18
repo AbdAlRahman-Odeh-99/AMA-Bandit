@@ -28,7 +28,7 @@ The implementation provides:
 - subset-dependent confidence bounds;
 - synthetic multiclass experiments with heterogeneous modality costs;
 - the Full-Space, HEDGE, and synthetic oracle comparisons used in the paper;
-- causal online AFA baselines that predict before updating on each sample; and
+- Online AFA baselines that predict before updating on each sample; and
 - reproducible seeded data splits and experiment outputs.
 
 ## Repository layout
@@ -134,7 +134,7 @@ comparisons at modest values of `V`, not large-scale runs.
 
 ## Online AFA baselines
 
-The baseline runner implements a causal, one-pass protocol: each method acquires
+The baseline runner implements a one-pass protocol: each method acquires
 modalities and predicts before seeing the current label, then updates using only
 the information available after that prediction. Acquisition costs are charged
 to one global training budget.
