@@ -2,18 +2,16 @@
 """
 core/acquisition_policies.py
 
-Shared acquisition policies and enumerated-arm bookkeeping for Adaptive and
-Two-stage. The standalone greedy acquisition has been removed; the nested
+Acquisition policies and enumerated-arm bookkeeping for Adaptive. The nested
 chain builder remains because it defines the action space used by
 ``lp_chain``.
 
 === Instrumentation note ===
 The acquisition entry points below carry a
 @timed("t_acquisition") decorator from core.logging_utils. That single
-placement is why the new t_acquisition column is populated for BOTH method
-families and for EVERY acquisition mode without either method module being
-edited: both of them reach their per-round subset choice through exactly
-these functions. Decorators, not `with` blocks, so no numerical body was
+placement is why the t_acquisition column is populated for every acquisition
+mode: each reaches its per-round subset choice through these functions.
+Decorators, not `with` blocks, so no numerical body was
 re-indented. The decorator is a no-op when timing is disabled and when no
 runner is collecting, so importing this module standalone costs nothing.
 Do NOT add a t_acquisition tick at any CALLER of these -- ticks accumulate
@@ -22,6 +20,8 @@ would count the same span twice.
 """
 
 from __future__ import annotations
+
+from itertools import combinations
 
 import numba
 import numpy as np
@@ -37,7 +37,7 @@ HEDGE_ACQUISITION_MODES = ("hedge",)
 FULL_ENUMERATION_MODES = ACQUISITION_MODES
 REWARD_UPDATE_SCOPES = ("subsets", "selected")
 MAX_REWARD_ESTIMATE_VIEWS = 20
-UCB_BOUNDS = ("vc", "vector")
+UCB_BOUNDS = ("vc", "theo", "vector")
 
 
 def validate_ucb_bound(ucb_bound):
@@ -49,14 +49,16 @@ def validate_ucb_bound(ucb_bound):
 
 
 def ucb_confidence_bonus(combo_counts, alpha_ucb, round_idx,
-                         ucb_bound="vc", vc_dimension=None):
-    """VC- or vector-complexity confidence radius for empirical rewards.
+                         ucb_bound="vc", vc_dimension=None,
+                         empirical_means=None):
+    """Additive optimism term for empirical arm rewards.
 
-    ``vc`` uses the model-complexity radius
-    ``alpha_ucb * sqrt((vc_dimension + log(round_idx + 2)) / n)``.  Callers
-    supply ``vc_dimension = K * d_arm**2`` for each arm.
-
-    ``vector`` uses the same radius with ``vc_dimension = d_arm``.
+    ``vc``: alpha_ucb * sqrt((K*d_arm**2 + log(round_idx+2)) / n).
+    ``vector``: alpha_ucb * sqrt((d_arm + log(round_idx+2)) / n).
+    ``theo``: beta*sqrt(mu_hat) + beta**2, where
+        beta = sqrt((d_arm + 2*log(t+1)) / n), L = c_b = 1.
+    For ``theo``, callers pass zero-based global ``round_idx`` so
+    t = round_idx + 1; ``alpha_ucb`` is unused.
     """
     validate_ucb_bound(ucb_bound)
     counts = np.asarray(combo_counts, dtype=np.float64)
@@ -71,6 +73,17 @@ def ucb_confidence_bonus(combo_counts, alpha_ucb, round_idx,
         raise ValueError("vc_dimension and combo_counts must have the same shape.")
     if np.any(complexity < 0):
         raise ValueError("vc_dimension must be non-negative.")
+    if ucb_bound == "theo":
+        if empirical_means is None:
+            raise ValueError("empirical_means is required for ucb_bound='theo'.")
+        means = np.asarray(empirical_means, dtype=np.float64)
+        if means.shape != counts.shape:
+            raise ValueError("empirical_means and combo_counts must have the same shape.")
+        if np.any(~np.isfinite(means)) or np.any((means < 0) | (means > 1)):
+            raise ValueError("empirical_means must be finite and in [0, 1].")
+        beta = np.sqrt(
+            (complexity + 2 * np.log(int(round_idx) + 2)) / counts)
+        return beta * np.sqrt(means) + beta**2
     return float(alpha_ucb) * np.sqrt(
         (complexity + np.log(int(round_idx) + 2)) / counts)
 
@@ -297,6 +310,22 @@ def argmax_policy_over_estimates(ucb, combo_cost, omd_lambda,
     return int(np.argmax(score))
 
 
+def generate_view_combinations(m_modalities):
+    """Enumerate every subset of the PAID views {2, ..., m_modalities},
+    each returned with the FREE view 1 forced in (so every combo has at
+    least view 1). This is the full action set used by the enumerated
+    acquisition policies --
+    2^(m_modalities - 1) combos total, which is why nviews must stay small
+    (see MAX_RECOMMENDED_MODALITIES in core/datasets.py).
+    """
+    modalities = list(range(2, m_modalities + 1))
+    all_views = []
+    for r in range(len(modalities) + 1):
+        for combo in combinations(modalities, r):
+            all_views.append((1,) + combo)
+    return all_views
+
+
 def build_arm_tables(combos, costs, nviews):
     """Bookkeeping shared by every enumerated-action-space caller.
 
@@ -304,7 +333,7 @@ def build_arm_tables(combos, costs, nviews):
     ----------
     combos : list of 1-INDEXED view tuples
         Either greedy_chain(...) or
-        core.two_stage_utils.generate_view_combinations(nviews).
+        generate_view_combinations(nviews).
     costs : (nviews,) array, 0-indexed per-view costs.
 
     Returns

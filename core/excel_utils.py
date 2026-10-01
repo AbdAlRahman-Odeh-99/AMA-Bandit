@@ -1,6 +1,6 @@
 """
-Shared Excel output styling used by the Adaptive and Two-stage runners and
-by run_proposed_methods.py. It is a generic openpyxl formatting helper with
+Shared Excel output styling used by the Adaptive runner and
+scripts/local/run_proposed_methods.py. It is a generic openpyxl formatting helper with
 no method-specific logic.
 
 ADDED: add_run_info_sheet, which writes core.logging_utils' provenance

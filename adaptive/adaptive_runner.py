@@ -11,8 +11,8 @@ Driver for adaptive.py:
     (generate_modality_costs_heterogeneous), view 0 free, normalized so
     sum(costs) == 1 -- identical convention to the other runners, NOT the
     notebook's per-trial cost redraw.
-  - Split: selectable with split_mode. Use 80-20 for proposed-method
-    comparisons, or 60-20-20 when comparing with EDDI/DIME.
+  - Split: selectable with split_mode. Use 80-20 for adaptive runs,
+    or 60-20-20 when comparing with OL.
     Each seed gets its own split, center init, and inference-phase sampling rng -- this
     REPLACES the notebook's buggy trial loop, where generate_data and
     simulation were re-seeded with the SAME args.seed every trial so all
@@ -41,7 +41,7 @@ run_proposed_methods._normalize_frac_keyed_results applies unchanged);
 feedback / n_classes are experiment-level settings the caller records.
 
 === Observability (see core/logging_utils.py) ===
-Same treatment as the two_stage runner: logging instead of print, a
+This runner uses logging instead of print, a
 per-cell `guard` so one failure does not end the sweep, append-as-you-go
 row checkpointing to results/{run_id}.rows.jsonl, a Progress heartbeat with
 an ETA, and the fine timing decomposition alongside the untouched
@@ -204,7 +204,7 @@ def run_experiment(
     return shape: {budget_fraction: {metric_name: [per-seed values]}}.
 
     feedback: "full" (y_true revealed every round) or "bandit" (one-bit
-        reward only) -- selects the training-phase update rule.
+        reward only). Binary bandit rewards reveal the true label.
     acquisition: "lp_chain" (default; per-round LP over a nested greedy chain),
         "lp_full_opt" (oracle full-action LP with exact true-means arm
         values, LP solved once before the loop, each round a draw from the
@@ -216,12 +216,11 @@ def run_experiment(
         / synthetic_n_classes, so those must match what generated X_full --
         they do here by construction, since the same values feed
         load_dataset_as_numpy a few lines above.
-    reward_update: "subsets" or "selected". Used by learned policies and
-        ignored by lp_full_opt.
+    reward_update: "subsets" or "selected".
     synthetic_n_classes: "synthetic" only. For every other
         dataset, nclasses is inferred from the labels.
-    alpha_ucb / lr: training-phase exploration bonus scale and (bandit-only)
-        complementary-update learning rate -- notebook defaults.
+    alpha_ucb / lr: training-phase exploration bonus scale and
+        multiclass bandit complementary-update learning rate.
     run_inference: if False, ONLY the training phase (adaptive online
         training) executes; the inference-phase column-generation LP +
         physical-sampling inference is skipped entirely. The train/inference
@@ -254,14 +253,6 @@ def run_experiment(
 
     uses_empirical_arm_rewards = _uses_empirical_arm_rewards(acquisition)
 
-    if (feedback == "bandit" and reward_update == "subsets"and uses_empirical_arm_rewards):
-        raise ValueError(
-            "feedback='bandit' with reward_update='subsets' is incoherent: "
-            "counterfactual replay reads y_true, which bandit feedback does "
-            "not reveal. Use reward_update='selected' with feedback='bandit', "
-            "or feedback='full' with reward_update='subsets'."
-        )
-
     if acquisition in ORACLE_ACQUISITION_MODES and dataset_name not in SYNTHETIC_DATASETS:
         raise ValueError(
             f"acquisition={acquisition!r} needs the TRUE generative means, which "
@@ -287,6 +278,13 @@ def run_experiment(
         )
     n_samples, nviews = X_full.shape
     nclasses = int(Y_full.max()) + 1
+    if (feedback == "bandit" and nclasses > 2 and reward_update == "subsets"
+            and uses_empirical_arm_rewards):
+        raise ValueError(
+            "feedback='bandit' with reward_update='subsets' is incoherent "
+            "for more than two classes: the reward does not reveal "
+            "y_true for counterfactual replay."
+        )
 
     # ORACLE ACQUISITION SETUP
     true_means = None
@@ -547,8 +545,7 @@ def run_experiment(
                 if run.trace_rounds:
                     # This method's algorithm module returns only the played
                     # subset per round (no per-round lambda/budget state), so
-                    # the trace it can honestly produce is thinner than
-                    # two_stage's -- subsets and their costs, nothing invented.
+                    # the trace contains only subsets and their sizes.
                     for i, subset in enumerate(vals.get("selected_subsets") or []):
                         run.emit_trace({**cell, "round": i, "subset": list(subset),
                                         "n_views": len(subset)})
@@ -767,16 +764,12 @@ if __name__ == "__main__":
                               "arm table. 'hedge' uses multiplicative resource weights, "
                               "and 'lp_full_opt' is the synthetic-only oracle LP.")
     parser.add_argument("--reward-update", choices=REWARD_UPDATE_SCOPES, default="subsets",
-                         help="How empirical arm rewards are updated. "
-                                "'subsets' replays every arm contained in the played subset "
-                                "(counterfactual; requires y_true); 'selected' updates only the "
-                                "played arm from its 0/1 reward. Used by learned policies "
-                                "and ignored by lp_full_opt."
-                        )
+                         help="'subsets': exact contained-arm rewards when the "
+                              "label is known; 'selected': played arm only.")
     parser.add_argument("--data-path", type=str, default=None)
     parser.add_argument("--split-mode", choices=SPLIT_MODES, default="80-20",
-                        help="80-20 for comparing adaptive with two-stage; "
-                             "60-20-20 for comparison with EDDI/DIME.")
+                        help="80-20 for adaptive train/test runs; "
+                             "60-20-20 for comparison with OL.")
     parser.add_argument("--max-modalities", type=str, default="all",
                          help="Integer, or 'all' (default). Retained acquisition policies "
                               "are capped at MAX_REWARD_ESTIMATE_VIEWS.")
@@ -800,11 +793,13 @@ if __name__ == "__main__":
     parser.add_argument("--alpha-ucb", type=float, default=1.0)
     parser.add_argument(
         "--ucb-bound", choices=UCB_BOUNDS, default="vc",
-        help="Confidence bound for empirical arm rewards. 'vc' uses "
-             "alpha_ucb*sqrt((K*d_arm^2+log(t+2))/N_arm); 'vector' uses "
-             "alpha_ucb*sqrt((d_arm+log(t+2))/N_arm).")
+        help="Confidence bound for empirical arm rewards. 'vc' and "
+             "'vector' use alpha_ucb-scaled radii; 'theo' uses "
+             "beta=sqrt((d_arm+2*log(t+1))/N_arm) and score "
+             "mu_hat+beta*sqrt(mu_hat)+beta^2 (L=c_b=1; alpha_ucb ignored). "
+             "")
     parser.add_argument("--lr", type=float, default=1e-2,
-                         help="bandit feedback only: complementary-label update learning rate.")
+                         help="More than two classes with bandit feedback: complementary-label update learning rate.")
     parser.add_argument("--skip-inference", action="store_true",
                          help="Run ONLY the training phase (adaptive online training); skip the "
                               "inference-phase column-generation LP inference. Split and budgets are unchanged; "
@@ -853,7 +848,6 @@ if __name__ == "__main__":
                         help="Disable the fine-grained timing buckets (t_* columns "
                              "become NaN). train/inference/seed timings are unaffected.")
     args = parser.parse_args()
-
     budget_fractions = tuple(float(x) for x in args.budget_fractions.split(","))
     seeds = tuple(int(x) for x in args.seeds.split(","))
     max_modalities = None if args.max_modalities.lower() == "all" else int(args.max_modalities)
@@ -872,7 +866,7 @@ if __name__ == "__main__":
         n_classes = args.num_classes if args.dataset in MULTICLASS_SYNTHETIC_DATASETS else 2
         classes_tag = f"_K{n_classes}"
 
-    # Same scheme as run_proposed_methods.py, so the two entry points write
+    # Same scheme as scripts/local/run_proposed_methods.py, so the two entry points write
     # matching names.
     acq_tag = f"_{output_acquisition}"
     if _cli_has_ru:

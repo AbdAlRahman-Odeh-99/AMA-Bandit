@@ -1,3 +1,4 @@
+# test text
 # -*- coding: utf-8 -*-
 """
 adaptive.py
@@ -6,7 +7,6 @@ adaptive.py
 import numba
 import numpy as np
 from sklearn.metrics import f1_score, roc_auc_score
-from core.two_stage_utils import generate_view_combinations
 from core.acquisition_policies import (
     ACQUISITION_MODES,
     ARGMAX_ACQUISITION_MODES,
@@ -18,6 +18,7 @@ from core.acquisition_policies import (
     arm_accuracies_from_means,
     argmax_policy_over_estimates,
     build_arm_tables,
+    generate_view_combinations,
     greedy_chain,
     linprog_policy_over_estimates,
     mask_to_bits,
@@ -98,7 +99,9 @@ def run_training_phase(nviews, nclasses, costs, n_train, training_budget,
     a few acquisition-mode diagnostics that callers may ignore.
 
     feedback : {"full", "bandit"}
-        est_means update rule. Unchanged.
+        Binary bandit rewards reveal the label, so their class-mean
+        update matches full feedback. Larger class sets use the
+        complementary-label gradient under bandit feedback.
     acquisition : {"lp_chain", "lp_full_opt", "ucb_argmax", "hedge"}
         Per-round subset selection. See the module docstring's ACQUISITION
         MODES section. Learned policies use empirical arm rewards;
@@ -107,10 +110,8 @@ def run_training_phase(nviews, nclasses, costs, n_train, training_budget,
         The generative class means. Ignored by every other mode. Supply
         core.optimal_static.synthetic_true_means(...) at the POST-truncation
         view width (pass X_train.shape[1] as n_views_used).
-    reward_update : {"subsets", "selected"}, default "subsets"
-        Controls empirical arm-reward updates for learned policies and is
-        ignored by ``lp_full_opt``.
-        "subsets" replays every arm contained in the played subset;
+    reward_update : {"subsets", "selected"}
+        "subsets" replays every contained arm with a known label;
         "selected" scores only the played arm.
     force_free : bool, default True
         Passed to greedy_chain -- keeps the free view(s) in every acquired
@@ -134,12 +135,12 @@ def run_training_phase(nviews, nclasses, costs, n_train, training_budget,
     is_argmax = acquisition in ARGMAX_ACQUISITION_MODES
     is_hedge = acquisition in HEDGE_ACQUISITION_MODES
 
-    if (feedback == "bandit" and reward_update == "subsets" and uses_empirical_arm_rewards):
+    if (feedback == "bandit" and nclasses > 2
+            and reward_update == "subsets" and uses_empirical_arm_rewards):
         raise ValueError(
-            "feedback='bandit' with reward_update='subsets' is incoherent: the "
-            "counterfactual replay reads y_true, which bandit feedback does not "
-            "reveal. Use reward_update='selected' with feedback='bandit', or "
-            "feedback='full' with reward_update='subsets'.")
+            "feedback='bandit' with reward_update='subsets' is incoherent "
+            "for more than two classes: the reward does not reveal "
+            "the true label for counterfactual replay.")
     if acquisition in FULL_ENUMERATION_MODES and nviews > MAX_REWARD_ESTIMATE_VIEWS:
         raise ValueError(
             f"acquisition={acquisition!r} enumerates 2^(nviews-1) = 2^{nviews - 1} "
@@ -211,9 +212,12 @@ def run_training_phase(nviews, nclasses, costs, n_train, training_budget,
         arm_dimension = np.count_nonzero(combo_masks[indices], axis=-1)
         vc_dimension = (nclasses * np.square(arm_dimension)
                         if ucb_bound == "vc" else arm_dimension)
+        # Theoretical t counts all training rounds, including warmup.
+        bonus_round_idx = t if ucb_bound == "theo" else round_idx
         return ucb_confidence_bonus(
-            counts, alpha_ucb, round_idx,
-            ucb_bound=ucb_bound, vc_dimension=vc_dimension)
+            counts, alpha_ucb, bonus_round_idx,
+            ucb_bound=ucb_bound, vc_dimension=vc_dimension,
+            empirical_means=(r_hat[indices] if ucb_bound == "theo" else None))
 
     b_allowance = spending_ratio
     p_oracle = None
@@ -349,6 +353,13 @@ def run_training_phase(nviews, nclasses, costs, n_train, training_budget,
         y_true = int(Y_train[t])
         reward = y_pred == y_true
 
+        # Binary bandit feedback reveals the label: an incorrect prediction
+        # must belong to the other class. Use only the observable label
+        # for counterfactual replay and class-mean updates.
+        observed_label = y_true if feedback == "full" else None
+        if feedback == "bandit" and nclasses == 2:
+            observed_label = y_pred if reward else 1 - y_pred
+
         # Per-arm empirical reward update. During the forced full-modality
         # initialization, full-feedback/subset replay can evaluate every arm
         # contained in the acquired full set, so retain those observations.
@@ -374,17 +385,18 @@ def run_training_phase(nviews, nclasses, costs, n_train, training_budget,
                 for k in contained_idx:
                     m_k = combo_masks[k]
                     y_sub = int(pred_linear_cla(X_train[t, m_k], est_means[:, m_k]))
-                    targets.append((int(k), float(y_sub == y_true)))
+                    r_obs = float(y_sub == observed_label)
+                    targets.append((int(k), r_obs))
 
             for j0, r_obs in targets:
                 combo_counts[j0] += 1.0
                 r_hat[j0] += (r_obs - r_hat[j0]) / combo_counts[j0]
 
         # Update means
-        if feedback == "full":
-            # y_true revealed every round: running mean of the TRUE class
-            est_counts[y_true, subset] += 1
-            est_means[y_true, subset] += ((1.0 / est_counts[y_true, subset]) * (x_obs - est_means[y_true, subset]))
+        if observed_label is not None:
+            # Full feedback, or the equivalent inferred binary label.
+            est_counts[observed_label, subset] += 1
+            est_means[observed_label, subset] += ((1.0 / est_counts[observed_label, subset]) * (x_obs - est_means[observed_label, subset]))
         else:  # bandit
             est_counts[y_pred, subset] += 1
             if reward:

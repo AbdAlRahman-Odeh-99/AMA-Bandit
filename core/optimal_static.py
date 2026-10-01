@@ -4,7 +4,7 @@ core/optimal_static.py
 
 Optimal STATIC (fixed-distribution) acquisition policy over view
 combinations, computed from the KNOWN generative means -- the oracle
-benchmark for the Two-stage acquisition policy, generalized to K classes
+benchmark for fixed acquisition policies, generalized to K classes
 and to this codebase's
 heterogeneous per-view cost convention.
 
@@ -34,9 +34,8 @@ make it useless as a bound. Callers must gate on the dataset name;
 === WHAT THIS IS AND IS NOT A BOUND ON ===
 IS: a lower bound on the error of any NON-ADAPTIVE policy -- i.e. any
 policy that draws the view subset from a fixed distribution that does not
-depend on the sample x_t. two_stage's Stage 2 is exactly such a policy
-(run_alg_multiclass's expert weights never look at x[t]), so this is the
-right comparator for `error_rate` / `inference_error` there.
+depend on the sample x_t. This is a comparator for fixed acquisition
+distributions in synthetic experiments.
 
 IS NOT: a bound for ADAPTIVE acquisition. A policy that chooses which
 paid views to buy AFTER seeing the free view can beat any fixed
@@ -102,9 +101,7 @@ def synthetic_true_means(
     consumption of it is `means = rng.random(size=(K, n_views)) * mean_scale`,
     so replaying that one draw here reproduces the means bit-for-bit
     (verified by direct comparison). make_blobs then assigns label k to
-    centers[k], so row k is class k's mean and NO Hungarian matching is
-    needed -- same reasoning as initialize_centers_multiclass's supervised
-    init (see two_stage_multiclass.py's module docstring).
+    centers[k], so row k is class k's mean and no label matching is needed.
 
     synthetic_n_views: the value passed to the GENERATOR (--n-views). The
         draw MUST be made at this full width and truncated afterwards --

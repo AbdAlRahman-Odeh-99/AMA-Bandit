@@ -12,7 +12,7 @@ BINARY (2-class) tabular:
   - "physionet"       PhysionetDataset      local CSV required (data-use
                                             agreement)
 
-MULTICLASS (K>2) -- runnable on Adaptive and Two-stage:
+MULTICLASS (K>2) -- runnable on Adaptive and OL:
   - "diabetes"        3-class NHANES-derived diabetes status. LOCAL CSV
                       required (3-class target as the LAST column) -- the
                       exact AFA preprocessing isn't publicly auto-fetchable.
@@ -60,7 +60,7 @@ SPLIT_SEED = 42
 SPLIT_MODES = ("80-20", "60-20-20")
 SAMPLING_MODES = ("balanced", "stratified", "random")
 DEFAULT_SAMPLING_MODE = "balanced"
-# Cost config 
+# Cost config
 DISTRIBUTION = "lognormal"  # or "uniform"
 LOGNORMAL_MEAN = 0.0
 LOGNORMAL_SIGMA = 1.0
@@ -129,9 +129,8 @@ def split_by_mode(
 ) -> tuple[list[int], list[int], list[int]]:
     """Return train, validation, and test indices for one comparison mode.
 
-    ``80-20`` is for comparing adaptive and two-stage directly. Its
-    validation list is empty. ``60-20-20`` is for comparisons against EDDI
-    or DIME and uses the same held-out test indices as those baselines.
+    ``80-20`` is the default adaptive train/test split; its validation list
+    is empty. ``60-20-20`` aligns adaptive experiments with OL comparisons.
     Both modes use the same deterministic ``random.Random(seed)`` shuffle.
     """
     if split_mode not in SPLIT_MODES:
@@ -817,12 +816,7 @@ def load_binary_afa_dataset(
 
 
 # --------------------------------------------------------------------------
-# Shared numpy-conversion wrapper, used by all three method runners
-# (gmm_bandit.gmm_bandit_runner, adaptive.adaptive_runner,
-# two_stage.two_stage_runner) so none of them need to depend on each other
-# just to load data. Previously this function was duplicated near-verbatim
-# in gmm_bandit_runner.py and adaptive_runner.py (and two_stage_runner.py
-# imported the bandit copy directly) -- consolidated here instead.
+# Shared numpy-conversion wrapper used by Adaptive and OL experiment runners.
 # --------------------------------------------------------------------------
 
 # 2^15 = 32,767 subsets -- the shared tractability threshold for any
@@ -861,7 +855,7 @@ def load_dataset_as_numpy(
         columns. For SYNTHETIC datasets, has NO effect here -- pass the
         desired view count as synthetic_n_views instead (callers that want
         one "--max-modalities" knob to drive both, e.g.
-        run_proposed_methods.py, do that mapping themselves before calling
+        scripts/local/run_proposed_methods.py, do that mapping themselves before calling
         this function).
 
     max_samples: caps a REAL dataset to at most this many rows (see

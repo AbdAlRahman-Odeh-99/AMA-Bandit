@@ -1,47 +1,72 @@
-# AMA-Bandit
+# AFA-Bandit
 
-**Cost-Aware Online Multi-Modal Classification**
+**Provably Near-Optimal Online Multi-Feature Classification under Budget Constraints**
 
-AMA-Bandit is a research codebase for budget-constrained online active feature
-acquisition (AFA). At each round, a learner chooses which modalities to acquire,
-predicts a class label, observes feedback, and updates its predictor while
-respecting a global acquisition budget.
+This repository accompanies the submitted manuscript **“AFA-Bandit: Provably
+Near-Optimal Online Multi-Feature Classification under Budget Constraints”** by
+AbdAlRahman Odeh, Teng-Hui Huang, and Hesham El Gamal. It studies online active
+feature acquisition (AFA): a learner buys features, predicts a label, then
+updates from the revealed label while respecting a global acquisition budget.
+The code calls these features *modalities* or *views* in command options.
 
-This repository accompanies the manuscript **“AMA-Bandit: Cost-Aware Online
-Multi-Modal Classification.”** The proposed method, **LP-Chain**, formulates
-online AFA as a predictor-coupled combinatorial Bandits with Knapsacks problem.
-It combines online predictor learning, subset feedback, optimistic reward
-estimation, and budgeted acquisition over a nested chain of modality subsets.
+The paper formulates this as a predictor-coupled combinatorial Bandits with
+Knapsacks problem. Its regret bound applies to the **full combinatorial
+method**. **LP-Chain** makes the acquisition search scalable by considering a
+cost-aware chain of at most `V` nested subsets when one of `V` features is free.
+The paper reports that LP-Chain performs comparably to full subset search and
+outperforms HEDGE and Opportunistic Learning (OL) on the synthetic comparisons.
 
-## Why LP-Chain?
+## Run locally
 
-With `V` modalities and one always-available modality, direct Full-Space
-optimization considers up to `2^(V-1)` feasible subsets. LP-Chain restricts the
-search to at most `V` nested subsets. This substantially improves scalability
-while retaining performance close to Full Space in our experiments.
+Run these commands from the repository root after [installing the dependencies](#installation).
+The examples use synthetic data with 10 features, 1,000 samples, a 60/20/20
+train/validation/test split, budget fractions `0.1,0.3,0.5,0.7,0.9`, and ten
+seeds (42–51). The manuscript's main synthetic results average **50 trials**;
+these shorter commands are a convenient starting point. Change
+`--num-classes 2` to `4` for the four-class setting.
 
-The implementation provides:
+**LP-Chain:**
 
-- globally budgeted, one-pass online learning;
-- subset feedback: acquiring a set also reveals rewards for its feasible
-  subsets;
-- subset-dependent confidence bounds;
-- synthetic multiclass experiments with heterogeneous modality costs;
-- the Full-Space, HEDGE, and synthetic oracle comparisons used in the paper;
-- Online AFA baselines that predict before updating on each sample; and
-- reproducible seeded data splits and experiment outputs.
+```bash
+python -u scripts/local/run_proposed_methods.py --method adaptive --dataset synthetic --split-mode 60-20-20 --max-modalities 10 --n-samples 1000 --seeds 42,43,44,45,46,47,48,49,50,51 --feedback full --acquisition lp_chain --reward-update subsets --num-classes 2 --ucb-bound theo
+```
+
+**HEDGE-based BwK comparison:**
+
+```bash
+python -u scripts/local/run_proposed_methods.py --method adaptive --dataset synthetic --split-mode 60-20-20 --max-modalities 10 --n-samples 1000 --seeds 42,43,44,45,46,47,48,49,50,51 --feedback full --acquisition hedge --reward-update subsets --num-classes 2 --ucb-bound theo
+```
+
+**Synthetic full-action oracle:**
+
+```bash
+python -u scripts/local/run_proposed_methods.py --method adaptive --dataset synthetic --split-mode 60-20-20 --max-modalities 10 --n-samples 1000 --seeds 42,43,44,45,46,47,48,49,50,51 --feedback full --acquisition lp_full_opt --reward-update subsets --num-classes 2 --ucb-bound theo
+```
+
+**Sequential OL baseline:**
+
+```bash
+python -m baselines.ol --dataset synthetic --n-samples 1000 --n-views 10 --num-classes 2 --budget-fractions 0.1,0.3,0.5,0.7,0.9 --seeds 42,43,44,45,46,47,48,49,50,51
+```
+
+For all local command variants, see
+[`scripts/local/Synthetic_Local_CMD.txt`](scripts/local/Synthetic_Local_CMD.txt)
+and [`scripts/local/Real_Local_CMD.txt`](scripts/local/Real_Local_CMD.txt).
+Additional OL notes are in
+[`scripts/local/Baselines_Local_CMD.txt`](scripts/local/Baselines_Local_CMD.txt).
 
 ## Repository layout
 
 ```text
-adaptive/   LP-Chain, Full-Space, HEDGE, oracle acquisition, and experiment runner
-baselines/  Online AFA baseline implementations and shared baseline runner
+adaptive/   LP-Chain, Combinatorial, HEDGE, oracle acquisition, and experiment runner
+baselines/  Sequential Opportunistic Learning (OL) baseline and its helpers
 core/       Datasets, budget accounting, acquisition policies, LP routines,
             logging, metrics, and training-state utilities
+scripts/local/  Adaptive Python driver and local command lists
 ```
 
-Run all commands from the repository root so Python can resolve the package
-imports correctly.
+Run commands from the repository root so data, logs, and results use the
+expected paths. Additional local commands are listed in `scripts/local/`.
 
 ## Installation
 
@@ -71,104 +96,43 @@ python -m pip install --upgrade pip
 python -m pip install numpy pandas scipy scikit-learn torch numba tqdm openpyxl ucimlrepo
 ```
 
-## Quick start
+## Methods and paper experiments
 
-Run LP-Chain on synthetic data with 1,000 samples, 10 modalities, 2 classes,
-and the default budget sweep:
-
-```bash
-python -m adaptive.adaptive_runner \
-  --dataset synthetic \
-  --n-samples 1000 \
-  --n-views 10 \
-  --num-classes 2 \
-  --acquisition lp_chain
-```
-
-The default budget fractions are `0.1,0.3,0.5,0.7,0.9`. Adaptive results are
-written under `results/Adaptive/singlepass/` unless `--output-xlsx` is supplied.
-
-To see every available option:
-
-```bash
-python -m adaptive.adaptive_runner --help
-python -m baselines.run_baselines --help
-```
-
-## Reproducing the synthetic protocol
-
-The paper evaluates synthetic Gaussian-mixture data with 10 modalities,
-heterogeneous normalized costs, one free modality, class counts `K in {2, 4}`,
-five budget fractions, and 50 trials (seeds 42–91).
-
-The command below runs LP-Chain for the two-class setting:
-
-```bash
-python -m adaptive.adaptive_runner \
-  --dataset synthetic \
-  --split-mode 60-20-20 \
-  --n-samples 1000 \
-  --n-views 10 \
-  --num-classes 2 \
-  --budget-fractions 0.1,0.3,0.5,0.7,0.9 \
-  --seeds 42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91 \
-  --acquisition lp_chain
-```
-
-Use `--num-classes 4` for the four-class experiment.
-
-### Acquisition comparisons
-
-Replace the final acquisition argument to run the corresponding comparison:
-
-| Comparison | Argument | Description |
+| Paper method | Command option | Role |
 |---|---|---|
-| LP-Chain | `--acquisition lp_chain` | Proposed chain-restricted LP policy |
-| Full Space | `--acquisition ucb_argmax` | UCB argmax over the full subset space |
-| HEDGE | `--acquisition hedge` | HEDGE-based Bandits with Knapsacks policy |
-| Oracle | `--acquisition lp_full_opt` | Synthetic-only full-action static oracle |
+| LP-Chain | `--acquisition lp_chain` | Cost-aware nested chain with a budgeted LP over at most `V` actions |
+| Combinatorial | `--acquisition ucb_argmax` | Full-action primal–dual policy used for the regret analysis and chain ablation |
+| HEDGE-based BwK | `--acquisition hedge` | Full-action budgeted-bandit comparison |
+| Full-action oracle | `--acquisition lp_full_opt` | Synthetic-only fixed distribution using the true synthetic means |
+| Opportunistic Learning | `python -m baselines.ol` | Sequential neural acquisition and prediction baseline |
 
-Full Space and the oracle enumerate the subset action space and therefore scale
-exponentially with the number of modalities. They are intended for controlled
-comparisons at modest values of `V`, not large-scale runs.
+For LP-Chain and HEDGE, `--reward-update subsets` reuses the observed label and
+acquired features to score every feasible subset of the selected action. The
+appendix's Naive Update ablation uses `--reward-update selected` instead. The
+oracle's `--reward-update` and `--ucb-bound` arguments do not change its policy.
+Full-action methods enumerate `2^(V-1)` actions when one feature is free, so
+large `V` can be expensive.
 
-## Online AFA baselines
+The main synthetic comparison uses Gaussian-mixture data with `V=10`,
+`K∈{2,4}`, heterogeneous normalized costs, one free feature, and five budget
+fractions. It averages 50 independent trials. For a local reproduction, use
+the commands above with seeds 42–91 for **each** method. The Gaussian model
+generates the data; the learning methods do not receive its true means. Only
+the synthetic-only oracle uses them.
 
-The baseline runner implements a one-pass protocol: each method acquires
-modalities and predicts before seeing the current label, then updates using only
-the information available after that prediction. Acquisition costs are charged
-to one global training budget.
+The appendix compares LP-Chain, HEDGE, and OL on CKD, Bank Marketing,
+PhysioNet, Diabetes, MNIST, and Fashion-MNIST. These runs use 16 modalities,
+five seeds (42–46), the 60/20/20 split, and the same five budget fractions.
+MNIST and Fashion-MNIST are pooled to 4×4 features; datasets other than CKD
+are capped at 10,000 rows. The local real-data commands are in
+[`scripts/local/Real_Local_CMD.txt`](scripts/local/Real_Local_CMD.txt).
 
-Run all implemented online baselines:
-
-```bash
-python -m baselines.run_baselines \
-  --method online_all \
-  --dataset synthetic \
-  --n-samples 1000 \
-  --n-views 10 \
-  --num-classes 2 \
-  --seeds 42,43,44,45,46
-```
-
-Run one method by replacing `online_all` with one of:
-
-- `online_aaco`
-- `online_cae`
-- `online_cwcf`
-- `online_dime`
-- `online_eddi`
-- `online_gdfs`
-- `online_jafa`
-- `online_ol`
-- `online_pt`
-
-The paper reports EDDI, CwCF, and PT as representative information-theoretic,
-policy-learning, and static-selection baselines. The remaining implementations
-are included for broader evaluation.
-
-Baseline results are saved as CSV files. Use `--output-csv` to choose an
-explicit destination.
+OL starts each encounter with the free modality, buys affordable modalities
+sequentially, predicts, and then updates its P/Q networks from replay. It
+respects the global budget and a per-encounter cap. Its default number of
+encounters equals the training-set size, but its class-balanced stream can
+repeat rows, so this does not guarantee one visit per row. OL uses a 60/20/20
+split automatically.
 
 ## Datasets
 
@@ -186,9 +150,14 @@ formats, and dataset-specific defaults.
 
 ## Outputs and reproducibility
 
-Experiment outputs include reward and error metrics, acquisition statistics,
-timings, selected subsets, and run configuration. Adaptive experiments can also
-persist training states for later inference and write detailed diagnostic data.
+Adaptive runs write Excel workbooks under `results/Adaptive/singlepass/` by
+default; use `--output-xlsx` to choose another path. OL writes CSV files
+directly under `results/` by default; use `--output-csv` to place them elsewhere.
+Results include online training metrics recorded **before** the current sample
+updates the model, along with held-out validation and test metrics. LP-Chain
+and HEDGE use the same nearest-class-mean predictor, while OL trains its own
+neural predictor and acquisition policy. Adaptive runs can also save training
+states and diagnostic traces.
 
 Useful options include:
 
@@ -203,28 +172,26 @@ For a quick source check:
 
 ```bash
 python -m compileall -q adaptive baselines core
-python -m adaptive.adaptive_runner --help
-python -m baselines.run_baselines --help
+python scripts/local/run_proposed_methods.py --help
+python -m baselines.ol --help
 ```
 
 ## Citation
 
-The manuscript is currently under submission. Citation details will be updated
-when a public preprint or final publication is available. In the meantime,
-please cite the repository as:
+The manuscript is under submission. Until a public preprint or final version
+is available, cite it as:
 
 ```bibtex
-@misc{ama_bandit_2026,
-  title        = {AMA-Bandit: Cost-Aware Online Multi-Modal Classification},
-  year         = {2026},
-  howpublished = {GitHub repository},
-  url          = {https://github.com/AbdAlRahman-Odeh-99/AMA-Bandit}
+@unpublished{odeh2026afabandit,
+  author = {Odeh, AbdAlRahman and Huang, Teng-Hui and El Gamal, Hesham},
+  title  = {AFA-Bandit: Provably Near-Optimal Online Multi-Feature Classification under Budget Constraints},
+  year   = {2026},
+  note   = {Manuscript under submission}
 }
 ```
 
 ## Acknowledgements
 
-The online AFA comparisons build on ideas and implementations from the active
-feature acquisition literature, including methods represented in AFABench.
+The OL comparison builds on work from the active feature acquisition literature.
 Please consult the accompanying paper for the complete discussion and original
 method citations.

@@ -1,0 +1,11 @@
+OL baseline examples
+====================
+
+Run the causal sequential Opportunistic Learning baseline on synthetic data:
+
+python -m baselines.ol --dataset synthetic --n-samples 1000 --n-views 10 --num-classes 2 --budget-fractions 0.1,0.3,0.5,0.7,0.9 --seeds 42,43,44,45,46
+
+Each training row is encountered once by default. The prediction is recorded
+before that row is added to replay and the P/Q networks are updated. Use
+--episodes 40000 to repeat the balanced training stream for the original
+diabetes-notebook length. Use --output-csv to set the results file.
