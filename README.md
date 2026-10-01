@@ -93,7 +93,7 @@ Install the required packages:
 
 ```bash
 python -m pip install --upgrade pip
-python -m pip install numpy pandas scipy scikit-learn torch numba tqdm openpyxl ucimlrepo
+python -m pip install -r requirements.txt
 ```
 
 ## Methods and paper experiments
