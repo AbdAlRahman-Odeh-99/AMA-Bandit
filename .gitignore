@@ -1,0 +1,41 @@
+# Python environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Experiment output directories
+/results/
+/logs/
+
+# Tabular and spreadsheet results. Keep local input datasets visible.
+*.csv
+!data/*.csv
+!data/**/*.csv
+*.xls
+*.xlsx
+
+# Logs, recovery sidecars, and training-state databases
+*.log
+*.rows.jsonl
+*.trace.jsonl
+*.manifest.json
+*.training_states.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+
+# Generated plots and model/data artifacts
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.svg
+*.npy
+*.npz
+*.pt
+*.pth
+*.ckpt
+*.pkl
+*.pickle
